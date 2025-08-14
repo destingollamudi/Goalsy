@@ -1,2 +1,7 @@
 # Goalsy
-The social media app that brings personal goal and habit accountability with your freinds!
+The social habit and goal accountability app! 
+currently in development! 🚜👷🚧🏗️
+
+## Project Structure
+- `/mobile` - React Native app (Expo)
+- `/backend` - Node.js GraphQL API

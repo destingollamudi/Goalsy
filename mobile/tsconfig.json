@@ -1,0 +1,6 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "lib": ["es2015"]
+  }
+}
