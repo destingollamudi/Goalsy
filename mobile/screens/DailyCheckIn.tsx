@@ -325,7 +325,6 @@ const styles = StyleSheet.create({
   previewContainer: {
     marginTop: 20,
     alignItems: 'center',
-  },
   goalText: {
     fontSize: 18,
     fontWeight: 'bold',
