@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View, Button, Image, TouchableOpacity } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { 
   useSharedValue, 
@@ -21,10 +21,11 @@ export default function DailyCheckIn({ onClose }: DailyCheckInProps) {
   const [backPhoto, setBackPhoto] = useState<string | null>(null);
   const [retries, setRetries] = useState(0);
   const [currentCamera, setCurrentCamera] = useState<'back' | 'front'>('back');
-  const [cameraRef, setCameraRef] = useState<CameraView | null>(null);
+  const cameraRef = useRef<CameraView>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isSwapped, setIsSwapped] = useState(false);
-  const [showingOnlyMainPhoto, setShowingOnlyMainPhoto] = useState(false);
+  const [hideSmallPhoto, setHideSmallPhoto] = useState(false);
+  const [isZoomed, setIsZoomed] = useState(false);
   const scale = useSharedValue(1);
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -36,16 +37,27 @@ export default function DailyCheckIn({ onClose }: DailyCheckInProps) {
 
   const longPressPhoto = Gesture.LongPress()
     .minDuration(500)
+    .onStart(() => {
+      console.log('Long press started - hiding small photo');
+      runOnJS(setHideSmallPhoto)(true); 
+    })
     .onEnd(() => {
-      runOnJS(setShowingOnlyMainPhoto)(true);
+      console.log('Long press ended - showing small photo');
+      runOnJS(setHideSmallPhoto)(false);
     });
 
   const pinchGesture = Gesture.Pinch()
     .onUpdate((event) => {
       scale.value = Math.max(1, Math.min(event.scale, 3));
+      // Set isZoomed when scale > 1
+      if (scale.value > 1) {
+        runOnJS(setIsZoomed)(true);
+      }
     })
     .onEnd(() => {
       scale.value = withSpring(1);
+      // Reset isZoomed when pinch ends
+      runOnJS(setIsZoomed)(false);
     });
 
   const panGesture = Gesture.Pan()
@@ -83,9 +95,11 @@ export default function DailyCheckIn({ onClose }: DailyCheckInProps) {
     
     try {
       console.log('Taking back camera photo...');
-      const backPhotoResult = await cameraRef.takePictureAsync();
-      setBackPhoto(backPhotoResult.uri);
-      console.log('Back photo captured:', backPhotoResult.uri);
+      const backPhotoResult = await cameraRef.current?.takePictureAsync();
+      if (backPhotoResult?.uri) {
+        setBackPhoto(backPhotoResult.uri);
+      }
+      console.log('Back photo captured:', backPhotoResult?.uri || 'No photo captured');
       
       setCurrentCamera('front');
       console.log('Switching to front camera...');
@@ -93,9 +107,11 @@ export default function DailyCheckIn({ onClose }: DailyCheckInProps) {
       await new Promise<void>(resolve => setTimeout(() => resolve(), 1500));
       
       console.log('Taking front camera photo...');
-      const frontPhotoResult = await cameraRef.takePictureAsync();
-      setFrontPhoto(frontPhotoResult.uri);
-      console.log('Front photo captured:', frontPhotoResult.uri);
+      const frontPhotoResult = await cameraRef.current?.takePictureAsync();
+      if (frontPhotoResult?.uri) {
+        setFrontPhoto(frontPhotoResult.uri);
+      }
+      console.log('Front photo captured:', frontPhotoResult?.uri || 'No photo captured');
       
       setCurrentCamera('back');
       setCameraVisible(false);
@@ -121,28 +137,27 @@ export default function DailyCheckIn({ onClose }: DailyCheckInProps) {
     );
   }
 
-  return (
+return (
     <>
       {!cameraVisible ? (
         <GestureHandlerRootView style={{ flex: 1 }}>
-          {!showingOnlyMainPhoto ? (
-            // Normal photo display with both photos
-            <View style={styles.photoDisplayContainer}>
-              <Text style={styles.goalText}>Your Goal Check-in!</Text>
+          <View style={styles.photoDisplayContainer}>
+            <Text style={styles.goalText}>Your Goal Check-in!</Text>
+            
+            <View style={styles.photoContainer}>
               
-              <View style={styles.photoContainer}>
-                
-                {/* Main photo with zoom and long press */}
-                <GestureDetector gesture={mainPhotoGesture}>
-                  <Animated.View style={[styles.mainPhotoContainer, animatedStyle]}>
-                    <Image 
-                      source={{ uri: (isSwapped ? frontPhoto : backPhoto) || '' }} 
-                      style={styles.backPhoto} 
-                    />
-                  </Animated.View>
-                </GestureDetector>
-                
-                {/* Small photo with tap to swap */}
+              {/* Main photo with zoom and long press */}
+              <GestureDetector gesture={mainPhotoGesture}>
+                <Animated.View style={[styles.mainPhotoContainer, animatedStyle]}>
+                  <Image 
+                    source={{ uri: (isSwapped ? frontPhoto : backPhoto) || '' }} 
+                    style={styles.backPhoto} 
+                  />
+                </Animated.View>
+              </GestureDetector>
+              
+              {/* Small photo with tap to swap - conditionally rendered */}
+              { (!hideSmallPhoto && !isZoomed) && (
                 <GestureDetector gesture={tapSmallPhoto}>
                   <View style={styles.frontPhotoContainer}>
                     <Image 
@@ -151,41 +166,27 @@ export default function DailyCheckIn({ onClose }: DailyCheckInProps) {
                     />
                   </View>
                 </GestureDetector>
-                
-              </View>
+              )}
               
-              <View style={styles.buttonRow}>
-                <Button 
-                  title="Retake" 
-                  onPress={() => {
-                    setFrontPhoto(null);
-                    setBackPhoto(null);
-                    setCameraVisible(true);
-                    setIsSwapped(false);
-                    setShowingOnlyMainPhoto(false);
-                    scale.value = 1;
-                    translateX.value = 0;
-                    translateY.value = 0;
-                  }} 
-                />
-                <Button title="Done" onPress={onClose} />
-              </View>
             </View>
-          ) : (
-            // Full screen main photo only
-            <View style={styles.fullScreenContainer}>
-              <Image 
-                source={{ uri: (isSwapped ? frontPhoto : backPhoto) || '' }} 
-                style={styles.fullScreenPhoto} 
+            
+            <View style={styles.buttonRow}>
+              <Button 
+                title="Retake" 
+                onPress={() => {
+                  setFrontPhoto(null);
+                  setBackPhoto(null);
+                  setCameraVisible(true);
+                  setIsSwapped(false);
+                  setHideSmallPhoto(false); // Reset small photo visibility
+                  scale.value = 1;
+                  translateX.value = 0;
+                  translateY.value = 0;
+                }} 
               />
-              <TouchableOpacity 
-                style={styles.closeButton}
-                onPress={() => setShowingOnlyMainPhoto(false)}
-              >
-                <Text style={styles.closeButtonText}>✕</Text>
-              </TouchableOpacity>
+              <Button title="Done" onPress={onClose} />
             </View>
-          )}
+          </View>
         </GestureHandlerRootView>
       ) : (
         <View style={styles.cameraContainer}>
@@ -193,7 +194,7 @@ export default function DailyCheckIn({ onClose }: DailyCheckInProps) {
           <CameraView 
             style={styles.camera} 
             facing={currentCamera}
-            ref={setCameraRef}
+            ref={cameraRef}
           />
           <TouchableOpacity
             style={styles.cancelButton}
@@ -221,10 +222,10 @@ export default function DailyCheckIn({ onClose }: DailyCheckInProps) {
 const styles = StyleSheet.create({
   photoDisplayContainer: {
   flex: 1,
-  backgroundColor: '#fff',
+  backgroundColor: 'black',
   alignItems: 'center',
   justifyContent: 'flex-start',
-  paddingTop: 50,
+  paddingTop: 150,
   },
   mainPhotoContainer: {
     width: '100%',
@@ -330,14 +331,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 15,
+    color: 'white',
   },
   photoContainer: {
     position: 'relative',
-    width: 300,
-    height: 400,
+    width: 350,
+    height: 500,
     borderRadius: 15,
     overflow: 'hidden',
     marginBottom: 15,
+    borderWidth: 1,
+    borderColor: 'white'
   },
   backPhoto: {
     width: '100%',
@@ -352,7 +356,7 @@ const styles = StyleSheet.create({
     height: 160,
     borderRadius: 10,
     overflow: 'hidden',
-    borderWidth: 3,
+    borderWidth: 1,
     borderColor: 'white',
   },
   frontPhoto: {
